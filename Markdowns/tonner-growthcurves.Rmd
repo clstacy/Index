@@ -1,0 +1,669 @@
+---
+title: "Tonner-growthcurver-values"
+author: "Carson Stacy"
+date: "6/20/2020"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(tidyverse)
+library(DescTools)
+library(MESS)
+library(grofit)
+library(readxl)
+library(reshape2)
+library(here)
+library(stringr)
+library(ggpubr)
+
+# Week_2_Growthcurver_S1_parameters <- read_excel("~/Downloads/Week 2 - Growthcurver S1 parameters.xlsx")
+
+# if (file.exists("FinalOutPutfigX.Rda")) {
+#   load("FinalOutPutfigX.Rda")
+# } else {
+
+
+#IMPORT DATA HERE AS DATA.FRAME
+
+# dat <- read_csv("~/Downloads/Supplemental_Table_S1_ready.csv")
+Tonner_data_raw <- read_excel(here("Data/Raw/Supplemental_data/Tonner/Supplemental_Table_S1.xlsx"), sheet = "data")
+
+Tonner_data <- as.data.frame(Tonner_data_raw)
+
+#create new variable called ID that identifies each
+Tonner_data <- Tonner_data %>%
+  unite(ID, `mM PQ`, Strain, Bio, Tech, Well)
+
+#remove all unimportant variables
+Tonner_data_transposed <- data.frame(t(Tonner_data[-c(1:5)]))
+
+#change rownames into the time colummn
+Tonner_data_transposed <- cbind(names = rownames(Tonner_data_transposed), Tonner_data_transposed)
+
+#put column names as a column
+colnames(Tonner_data_transposed) <- c("Time", Tonner_data$ID)
+
+#remove column names
+row.names(Tonner_data_transposed) <- NULL
+
+#make time values numerics instead of characters
+Tonner_data_transposed$Time <- as.numeric(Tonner_data_transposed$Time)
+
+Tonner_processed <- Tonner_data_transposed
+
+
+dat <- Tonner_processed
+
+#let's cut off the early early stuff
+# dat <- tail(Tonner_processed, -20)
+
+
+
+#how long I want names to all be:
+namelengths <- 25
+#how many digits to chop off later
+replicates <- 8
+
+colnames(dat)[-1] <- str_pad(colnames(dat)[-1], namelengths, pad = "0", side = "left" )
+
+maxbyrowraw <- colnames(dat[-1])[max.col(dat[-1],ties.method="random")]
+maxbyrowconvert <- as.data.frame(table(maxbyrowraw))
+maxbyrowcount <- arrange(maxbyrowconvert,-Freq)
+maxmax <- as.character(maxbyrowcount$maxbyrowraw[1])
+
+#note: should always be 1 (first column)
+
+timeColumn <- 1
+#can be adjsuted. average of ctl replicates is recommended based on zero science (seems like a good start).
+if (exists("maxIsc") == TRUE) {
+  controlColumn <- maxIsc
+} else {
+controlColumn <- match(maxmax, names(dat))
+}
+#shouldn't change unless time column != 1
+a <- 2
+#ADJUST ME: total number of curves in table + 1
+b <- ncol(dat)
+
+
+firstRun <- TRUE
+c <- 2
+d <- length(dat[[timeColumn]])
+#d <- 20 #this is where 'stationary phase' would traditionally be considered fully reached
+
+#What is the timepoint at which stationary phase is reached?
+t_stationary <- 35
+# t_stationary <- 48
+
+
+for (j in c:d) {
+
+
+figX <- gcFitSpline(dat[[timeColumn]], dat[[controlColumn]], gcID = "spline",
+            control = grofit.control())
+lambda <- as.numeric(figX$parameters$lambda)
+mumax <- as.numeric(figX$parameters$mu)
+K <- as.numeric(figX$parameters$A)
+upperbound <- as.numeric(dat[j,1])
+#upperbound <- dat[timeColumn[[j]]
+#AUCraw <- AUC(dat[1:length(dat[[timeColumn]]),1], dat[1:length(dat[[controlColumn]]),controlColumn])
+AUCraw <- AUC(dat[1:j,1], dat[1:j,controlColumn])
+PI <- 0
+IscX <- 0
+
+storage.vector_figX <- data.frame( "mumax"= mumax, "K"= K, "lambda"= lambda, "UpperBound" = upperbound, "AUC" = AUCraw, "PI" = PI, "Isc" = IscX, stringsAsFactors=FALSE)
+
+
+for (i in a:b) {
+if(i != controlColumn) {
+figX <- gcFitSpline(dat[[timeColumn]], dat[[i]], gcID = "spline444",
+            control = grofit.control())
+#plot(figX)
+
+lambda <- as.numeric(figX$parameters$lambda)
+mumax <- as.numeric(figX$parameters$mu)
+K <- as.numeric(figX$parameters$A)
+upperbound <- as.numeric(dat[j,1])
+
+  AUCraw <- AUC(dat[1:j,1], dat[1:j,i])
+  if(i ==2) {
+    PI <- 0
+  } else {
+    PI <- (1 - (AUCraw/storage.vector_figX$AUC[1])) * 100
+  }
+
+  IscX <-  (1 - sqrt((AUCraw * K) / (storage.vector_figX$AUC[1] * storage.vector_figX$K[1]))) * 100
+
+
+storage.vector_figX <- rbind(storage.vector_figX, c( mumax, K, lambda, upperbound, as.numeric(AUCraw), PI, as.numeric(IscX)))
+
+
+}
+}
+#output <- rbind
+if(firstRun == TRUE) {
+  #something
+  firstRun <- FALSE
+  rownames(storage.vector_figX) <- colnames(dat[-timeColumn])
+  FinalOutPutfigX <- storage.vector_figX
+} else {
+  rownames(storage.vector_figX) <- colnames(dat[-timeColumn])
+  FinalOutPutfigX <- rbind(FinalOutPutfigX, storage.vector_figX)
+}
+
+}
+#storage.vector_figX <- storage.vector_figX[-c(1), ]
+
+#storage.vector_figX
+#Below code to get rid of scientific notation:
+options(scipen=999)
+#here is how to get back to scientific notation: options(scipen=0)
+
+
+
+library(data.table)
+setDT(FinalOutPutfigX, keep.rownames = TRUE)
+#here I'm fixing the group names to not say replicates
+# FinalOutPutfigX$rn <- c(str_replace_all(string=FinalOutPutfigX$rn,pattern="\\l.*$",replacement="l"))
+FinalOutPutfigX$rn <- substr(FinalOutPutfigX$rn, 1, namelengths) # - replicates)
+# df$col1 <- strtrim(df$col, 1, 1)
+
+IscOrderedOutputFigX <- FinalOutPutfigX %>%
+  arrange((Isc))
+
+
+
+if (exists("maxIsc") == TRUE) {
+  save(FinalOutPutfigX,file="FinalOutPutfigX.Rda")
+} else {
+maxIsc <- IscOrderedOutputFigX[1,1]
+}
+# }
+
+# for writing a data.frame or list of data.frames to an xlsx file
+#write.xlsx(FinalOutPutfigX, 'Isc_figXISC.xlsx')
+#FinalOutPUtfigXsave <- FinalOutPutfigX
+
+IscOrderedOutputFigX
+
+
+
+
+
+
+FinalOutPutfigX %>% group_by(rn)
+
+
+gdIsc <- FinalOutPutfigX %>%
+        group_by(rn, UpperBound) %>%
+        filter(UpperBound <= t_stationary) %>%
+        #group_by(UpperBound) %>%
+        summarise(Isc = mean(Isc)) #, .groups = "keep")
+
+## Median Isc instead of mean... how does it look? mean is commented out
+# gdVr <- gdIsc %>%
+#   group_by(rn) %>%
+#   summarize(Vr = median(Isc))
+
+gdVr <- gdIsc %>%
+  group_by(rn) %>%
+  summarize(Vr = auc(UpperBound, Isc, type = "spline")/(max(UpperBound) - min(UpperBound)))
+
+gdPI <- FinalOutPutfigX %>%
+        group_by(rn) %>%
+        summarise(PI = mean(PI))
+
+AUCfigX <- FinalOutPutfigX %>%
+    filter(UpperBound == max(FinalOutPutfigX$UpperBound)) %>%
+  #i added the arrange command b/c it looked funny compared to the rest of the indices
+    arrange(rn) %>%
+    mutate(rAUC = 100*(AUC/max(AUC))) %>% select(c(-1,-4, -5, -6, -7, -8))
+AUCfigX
+
+
+
+trimAUCfigX <- FinalOutPutfigX %>%
+    filter(UpperBound == t_stationary) %>%
+    arrange(rn) %>%
+    select(6)
+colnames(trimAUCfigX) <- "AUCtrim"
+
+
+gd <- cbind(gdVr, gdPI, AUCfigX, trimAUCfigX)
+gd <- gd[-3]
+gd
+
+
+
+
+gd$strain <- c(
+    rep("VNG1179", 12),
+    rep("asnC", 12),
+    rep("idr1", 12),
+    rep("idr2", 12),
+    rep("rosR", 12),
+    rep("sirR", 12),
+    rep("trmB", 12),
+    rep("ura3", 4*12),
+    rep("VNG1179", 12),
+    rep("asnC", 12),
+    rep("idr1", 12),
+    rep("idr2", 12),
+    rep("rosR", 12),
+    rep("sirR", 12),
+    rep("trmB", 12),
+    rep("ura3", 4*12)
+    # 
+    # rep("asnC", 12),
+    # rep("ura3", 12),
+    # rep("ura3", 12),
+    # 
+    # 
+    # rep("ura3", 12),
+    # rep("idr1", 12),
+    # rep("idr2", 12),
+    # rep("sirR", 12),
+    # 
+    # rep("ura3", 12),
+    # rep("rosR", 12),
+    # rep("ura3", 12),
+    # 
+    # 
+    # rep("ura3", 12),
+    # rep("trmB", 12),
+    # rep("VNG1179", 12),
+    # rep("ura3", 12)
+)
+
+# gd$strain <- c(
+#     rep("asnC", 12),
+#     rep("ura3_1", 12),
+#     rep("asnC", 12),
+#     rep("ura3_1", 12),
+#     rep("ura3_2", 12),
+#     rep("idr1_1", 12),
+#     rep("idr2_1", 12),
+#     rep("sirR_1", 12),
+#     rep("ura3_2", 12),
+#     rep("idr1_1", 12),
+#     rep("idr2_1", 12),
+#     rep("sirR_1", 12),
+#     rep("rosR", 12),
+#     rep("ura3_3", 12),
+#     rep("rosR", 12),
+#     rep("ura3_3", 12),
+#     rep("trmB", 12),
+#     rep("VNG1179", 12),
+#     rep("ura3_4", 12),
+#     rep("trmB", 12),
+#     rep("VNG1179", 12),
+#     rep("ura3_4", 12)
+# )
+
+gd$PQ <- c(
+    rep(0.333, 132),
+    rep(0, 132)
+)
+
+gd$PQ_factor <- factor(gd$PQ, levels = c("0.333", "0"))
+
+ggplot(data = NULL, aes(x = gd$PI, y = gd$Vr)) +
+  geom_point() +
+  geom_smooth(method = "lm") +
+  geom_abline() +
+  theme_classic()
+
+```
+
+```{r fig.height=24, fig.width=24}
+
+TonnerStrain <-  c(
+    rep("asnC", 12),
+    rep("ura3", 12),
+    rep("asnC", 12),
+    rep("ura3", 12),
+    rep("ura3", 12),
+    rep("idr1", 12),
+    rep("idr2", 12),
+    rep("sirR", 12),
+    rep("ura3", 12),
+    rep("idr1", 12),
+    rep("idr2", 12),
+    rep("sirR", 12),
+    rep("rosR", 12),
+    rep("ura3", 12),
+    rep("rosR", 12),
+    rep("ura3", 12),
+    rep("trmB", 12),
+    rep("VNG1179", 12),
+    rep("ura3", 12),
+    rep("trmB", 12),
+    rep("VNG1179", 12),
+    rep("ura3", 12)
+)
+
+
+TonnerPQ <- c(
+    rep(0, 2*12),
+    rep(1, 2*12),
+    rep(0, 4*12),
+    rep(1, 4*12),
+    rep(0, 2*12),
+    rep(1, 2*12),
+    rep(0, 3*12),
+    rep(1, 3*12)
+)
+
+Tonner_viz_prep <- melt(Tonner_processed, "Time")
+# Tonner_viz <- cbind(Tonner_viz_prep, rep(TonnerPQ, times = 97), rep(TonnerStrain, times = 97))
+Tonner_viz_variable <- str_split_fixed(Tonner_viz_prep$variable, "_", 5)
+Tonner_viz <- cbind(Tonner_viz_prep, Tonner_viz_variable)
+colnames(Tonner_viz) <- c("Time", "Variable", "Optical Density", "PQ", "Strain", "biological replicate", "technical Replicate", "well no")
+
+ggplot(data = Tonner_viz, aes(x = Time, y = `Optical Density`, color = PQ )) +
+  geom_line(aes(group = Variable)) +
+  facet_wrap(~Strain) 
+
+```
+
+
+
+```{r}
+
+
+ggplot(data = gd, aes(x = Vr, y = mumax, color = as.factor(PQ))) +
+  geom_point() +
+  #geom_smooth(method = "lm") +
+  #scale_color_gradientn(colours = rainbow(6)) +
+  facet_wrap(~strain) +
+  theme_bw()
+ggsave("Tonner_Vrvsmu_colPQ.tiff", path = "Visualizations", units = "in", width = 8, height = 6, dpi=300, compression = "lzw")
+
+ggplot(data = gd, aes(y = PI, x = Vr, color = as.factor(PQ))) +
+  geom_point() +
+  #geom_smooth(method = "lm") +
+  #scale_color_gradientn(colours = rainbow(6)) +
+  facet_wrap(~strain) +
+  theme_bw()
+ggsave("Tonner_VrvsPI_colPQ.tiff", path = "Visualizations", units = "in", width = 8, height = 6, dpi=300, compression = "lzw")
+
+ggplot(data = gd, aes(y = mumax, x = PI, color = as.factor(PQ))) +
+  geom_point() +
+  #geom_smooth(method = "lm") +
+  #scale_color_gradientn(colours = rainbow(6)) +
+  facet_wrap(~strain) +
+  theme_bw()
+ggsave("Tonner_PIvsmu_colPQ.tiff", path = "Visualizations", units = "in", width = 8, height = 6, dpi=300, compression = "lzw")
+
+ggplot(data = gd, aes(y = mumax, x = rAUC, color =  as.factor(PQ))) +
+  geom_point() +
+  #geom_smooth(method = "lm") +
+  #scale_color_gradientn(colours = rainbow(6)) +
+  facet_wrap(~strain) +
+  theme_bw() +
+    scale_x_reverse()
+ggsave("Tonner_rAUCvsmu_colPQ.tiff", path = "Visualizations", units = "in", width = 8, height = 6, dpi=300, compression = "lzw")
+
+ggplot(data = gd, aes(y = mumax, x = AUCtrim, color =  as.factor(PQ))) +
+  geom_point() +
+  #geom_smooth(method = "lm") +
+  #scale_color_gradientn(colours = rainbow(6)) +
+  facet_wrap(~strain) +
+  theme_bw() +
+    scale_x_reverse()
+ggsave("Tonner_AUCtrimvsmu_colPQ.tiff", path = "Visualizations", units = "in", width = 8, height = 6, dpi=300, compression = "lzw")
+
+ggplot(data = gd, aes(y = rAUC, x = Vr, color =  as.factor(PQ))) +
+  geom_point() +
+  #geom_smooth(method = "lm") +
+  #scale_color_gradientn(colours = rainbow(6)) +
+  facet_wrap(~strain) +
+  theme_bw()
+ggsave("Tonner_VrvsrAUC_colPQ.tiff", path = "Visualizations", units = "in", width = 8, height = 6, dpi=300, compression = "lzw")
+
+ggplot(data = gd, aes(y = AUCtrim, x = Vr, color =  as.factor(PQ))) +
+  geom_point() +
+  #geom_smooth(method = "lm") +
+  #scale_color_gradientn(colours = rainbow(6)) +
+  facet_wrap(~strain) +
+  theme_bw()
+ggsave("Tonner_VrvsAUCtrim_colPQ.tiff", path = "Visualizations", units = "in", width = 8, height = 6, dpi=300, compression = "lzw")
+
+ggplot(data = gd, aes(y = K, x = Vr, color = as.factor(PQ))) +
+  geom_point() +
+  #geom_smooth(method = "lm") +
+  #scale_color_gradientn(colours = rainbow(6)) +
+  facet_wrap(~strain) +
+  theme_bw()
+ggsave("Tonner_VrvsA_colPQ.tiff", path = "Visualizations", units = "in", width = 8, height = 6, dpi=300, compression = "lzw")
+
+ggplot(data = gd, aes(y = K, x = PI, color = as.factor(PQ))) +
+  geom_point() +
+  #geom_smooth(method = "lm") +
+  #scale_color_gradientn(colours = rainbow(6)) +
+  facet_wrap(~strain) +
+  theme_bw()
+ggsave("Tonner_PIvsA_colPQ.tiff", path = "Visualizations", units = "in", width = 8, height = 6, dpi=300, compression = "lzw")
+
+ggplot(data = gd, aes(y = K, x = rAUC, color = as.factor(PQ))) +
+  geom_point() +
+  #geom_smooth(method = "lm") +
+  #scale_color_gradientn(colours = rainbow(6)) +
+  facet_wrap(~strain) +
+  theme_bw()
+ggsave("Tonner_rAUCvsA_colPQ.tiff", path = "Visualizations", units = "in", width = 8, height = 6, dpi=300, compression = "lzw")
+
+ggplot(data = gd, aes(y = K, x = AUCtrim, color = as.factor(PQ))) +
+  geom_point() +
+  #geom_smooth(method = "lm") +
+  #scale_color_gradientn(colours = rainbow(6)) +
+  facet_wrap(~strain) +
+  theme_bw()
+ggsave("Tonner_AUCtrimvsA_colPQ.tiff", path = "Visualizations", units = "in", width = 8, height = 6, dpi=300, compression = "lzw")
+
+ggplot(data = gd, aes(x = K, y = mumax, color = as.factor(PQ))) +
+  geom_point() +
+  #geom_smooth(method = "lm") +
+  #scale_color_gradientn(colours = rainbow(6)) +
+  facet_wrap(~strain) +
+  theme_bw() +
+    scale_x_reverse()
+ggsave("Tonner_muvsA_colPQ.tiff", path = "Visualizations", units = "in", width = 8, height = 6, dpi=300, compression = "lzw")
+
+ggplot(data = gd, aes(y = AUCtrim, x = rAUC, color = as.factor(PQ))) +
+  geom_point() +
+  #geom_smooth(method = "lm") +
+  #scale_color_gradientn(colours = rainbow(6)) +
+  facet_wrap(~strain) +
+  theme_bw()
+ggsave("Tonner_AUCtrimvsrAUC_colPQ.tiff", path = "Visualizations", units = "in", width = 8, height = 6, dpi=300, compression = "lzw")
+
+
+
+
+ggplot(data=gd, aes(x = Vr, fill = as.factor(PQ))) +
+    geom_histogram(alpha=0.6) +
+    labs(fill="") +
+    facet_wrap(~strain) +
+  theme_bw() + scale_color_brewer(palette="Dark2")+
+  scale_fill_brewer(palette="Dark2")
+
+
+ggplot(data=gd, aes(x = PI, fill = as.factor(PQ))) +
+    geom_histogram(alpha=0.6) +
+    labs(fill="") +
+    facet_wrap(~strain) +
+  theme_bw() + scale_color_brewer(palette="Dark2")+
+  scale_fill_brewer(palette="Dark2")
+
+
+ggplot(data=gd, aes(x = mumax, fill = as.factor(PQ))) +
+    geom_histogram(alpha=0.6) +
+    facet_wrap(~strain)  +
+    scale_x_reverse() +
+  theme_bw() + scale_color_brewer(palette="Dark2")+
+  scale_fill_brewer(palette="Dark2")
+
+
+ggplot(data=gd, aes(x = K, fill = as.factor(PQ))) +
+    geom_histogram(alpha=0.6) +
+    facet_wrap(~strain)  +
+    scale_x_reverse() +
+  theme_bw() + scale_color_brewer(palette="Dark2")+
+  scale_fill_brewer(palette="Dark2")
+
+
+ggplot(data=gd, aes(x = rAUC, fill = as.factor(PQ))) +
+    geom_histogram(alpha=0.6) +
+    facet_wrap(~strain)  +
+    scale_x_reverse() +
+  theme_bw() + scale_color_brewer(palette="Dark2")+
+  scale_fill_brewer(palette="Dark2")
+
+
+ggplot(data=gd, aes(x = AUCtrim, fill = as.factor(PQ))) +
+    geom_histogram(alpha=0.6) +
+    facet_wrap(~strain)  +
+    scale_x_reverse() +
+  theme_bw() + scale_color_brewer(palette="Dark2")+
+  scale_fill_brewer(palette="Dark2")
+
+
+
+
+
+
+```
+^I really don't see a skew in the rAUC or AUCtrim data... evidence against the use of log transformation..
+
+```{r fig.height=6, fig.width=8}
+options(scipen = 0)
+ggscatter(gd, x = "K", y = "Vr", 
+          add = "reg.line", 
+          fill = "PQ_factor", 
+          shape = 21, size = 2, 
+          # conf.int = TRUE, 
+          palette = c("red", "black")) +
+  facet_wrap(~strain) +
+  stat_cor(label.y = 45, label.x = 0.275, 
+           aes(label = paste(..rr.label.., ..p.label.., sep = "~`,`~")))
+
+ggscatter(gd, x = "mumax", y = "Vr", 
+          add = "reg.line", 
+          fill = "PQ_factor", 
+          shape = 21, size = 2, 
+          # conf.int = TRUE, 
+          palette = c("red", "black")) +
+  facet_wrap(~strain) +
+  stat_cor(label.y = 50, label.x = 0.01, 
+           aes(label = paste(..rr.label.., ..p.label.., sep = "~`,`~")))
+
+ggscatter(gd, x = "AUCtrim", y = "Vr", 
+          add = "reg.line", 
+          fill = "PQ_factor", 
+          shape = 21, size = 2, 
+          # conf.int = TRUE, 
+          palette = c("red", "black")) +
+  facet_wrap(~strain) +
+  stat_cor(label.y = 0, label.x = 0.275, 
+           aes(label = paste(..rr.label.., ..p.label.., sep = "~`,`~")))
+
+ggscatter(gd, x = "rAUC", y = "Vr", 
+          add = "reg.line", 
+          fill = "PQ_factor", 
+          shape = 21, size = 2, 
+          # conf.int = TRUE, 
+          palette = c("red", "black")) +
+  facet_wrap(~strain) +
+  stat_cor(label.y = 10, label.x = 0.275, 
+           aes(label = paste(..rr.label.., ..p.label.., sep = "~`,`~")))
+
+ggscatter(gd, x = "PI", y = "Vr", 
+          add = "reg.line", 
+          fill = "PQ_factor", 
+          shape = 21, size = 2, 
+          # conf.int = TRUE, 
+          palette = c("red", "black")) +
+  facet_wrap(~strain) +
+  stat_cor(label.y = 50, label.x = -10, 
+           aes(label = paste(..rr.label.., ..p.label.., sep = "~`,`~")))
+
+ggscatter(gd, x = "mumax", y = "rAUC", 
+          add = "reg.line", 
+          fill = "PQ_factor", 
+          shape = 21, size = 2, 
+          # conf.int = TRUE, 
+          palette = c("red", "black")) +
+  facet_wrap(~strain) +
+  stat_cor(label.y = 40, label.x = 0.01, 
+           aes(label = paste(..rr.label.., ..p.label.., sep = "~`,`~")))
+
+ggscatter(gd, x = "mumax", y = "PI", 
+          add = "reg.line", 
+          fill = "PQ_factor", 
+          shape = 21, size = 2, 
+          # conf.int = TRUE, 
+          palette = c("red", "black")) +
+  facet_wrap(~strain) +
+  stat_cor(label.y = 30, label.x = 0.01, 
+           aes(label = paste(..rr.label.., ..p.label.., sep = "~`,`~")))
+```
+
+```{r fig.height=11, fig.width=10}
+
+#now let's switch to barplots instead to compare them all.
+
+
+ggVr <- ggplot(data=gd, aes(y = Vr, x = as.factor(PQ))) +
+    geom_boxplot() +
+    labs(fill="") +
+    facet_wrap(~strain, nrow = 1) +
+  theme_bw()
+
+
+ggPI <- ggplot(data=gd, aes(y = PI, x = as.factor(PQ))) +
+    geom_boxplot() +
+    labs(fill="") +
+    facet_wrap(~strain, nrow = 1) +
+  theme_bw()
+
+
+ggmu <- ggplot(data=gd, aes(y = mumax, x = as.factor(PQ))) +
+    geom_boxplot() +
+    facet_wrap(~strain, nrow = 1)  +
+    scale_y_reverse() +
+  theme_bw()
+
+
+ggK <- ggplot(data=gd, aes(y = K, x = as.factor(PQ))) +
+    geom_boxplot() +
+    facet_wrap(~strain, nrow = 1)  +
+    scale_y_reverse() +
+  theme_bw()
+
+
+ggrAUC <- ggplot(data=gd, aes(y = rAUC, x = as.factor(PQ))) +
+    geom_boxplot() +
+    facet_wrap(~strain, nrow = 1)  +
+    scale_y_reverse() +
+  theme_bw()
+
+
+ggAUCt <- ggplot(data=gd, aes(y = AUCtrim, x = as.factor(PQ))) +
+    geom_boxplot() +
+    facet_wrap(~strain, nrow = 1)  +
+    scale_y_reverse() +
+  theme_bw()
+
+
+ggarrange(ggVr, ggPI, ggrAUC, ggAUCt, ggK, ggmu, ncol = 1)
+
+#code to save as an image:
+ggsave("Tonner_all_measures.tiff", path = "Visualizations", units = "in", width = 10, height = 11, dpi=300, compression = "lzw")
+
+```
+

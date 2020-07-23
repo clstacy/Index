@@ -1,0 +1,1812 @@
+---
+title: "Ceballos-growthcurver-values"
+author: "Carson Stacy"
+date: "6/20/2020"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+# renv::init()
+
+library(tidyverse)
+library(DescTools)
+library(MESS)
+#this should normally be commented out, except when knitting. it is where I downloaded grofit b/c it is depreicated now...
+# install.packages("~/Downloads/grofit_1.1.1-1.tar.gz", repos = NULL, type = "source")
+library(grofit)
+library(readxl)
+library(ggpubr)
+library(here)
+# set_here(path='..')
+
+# Week_2_Growthcurver_S1_parameters <- read_excel("~/Downloads/Week 2 - Growthcurver S1 parameters.xlsx")
+
+# if (file.exists("FinalOutPutfigZ.Rda")) {
+#   load("FinalOutPutfigZ.Rda")
+# } else {
+
+options(scipen = 999)
+
+#IMPORT DATA HERE AS DATA.FRAME
+
+# dat <- read_csv("~/Downloads/Supplemental_Table_S1_ready.csv")
+
+dat <- read_excel(here("/Data/Processed/Sulfolobus/Sulfolobus_Infection_Growth_Curves.xlsx"), sheet = "S437")
+
+
+dat <- as.data.frame(dat[complete.cases(dat),])
+
+
+
+trim <- 15
+
+colnames(dat)[1] <- "time"
+
+colnames(dat)[-1] <- str_pad(colnames(dat)[-1], trim, pad = "0", side = "left" )
+
+
+
+
+# maxbyrowraw <- colnames(dat[-1])[max.col(dat[-1],ties.method="random")]
+# maxbyrowconvert <- as.data.frame(table(maxbyrowraw))
+# maxbyrowcount <- arrange(maxbyrowconvert,-Freq)
+# maxmax <- as.character(maxbyrowcount$maxbyrowraw[1])
+
+#note: should always be 1 (first column)
+
+timeColumn <- 1
+#can be adjsuted. average of ctl replicates is recommended based on zero science (seems like a good start).
+controlColumn <- 5
+#shouldn't change unless time column != 1
+a <- 2
+#ADJUST ME: total number of curves in table + 1
+b <- ncol(dat)
+#What is the timepoint at which stationary phase is reached?
+t_stationary <- 32
+
+firstRun <- TRUE
+c <- 2
+d <- length(dat[[timeColumn]])
+#d <- 20 #this is where 'stationary phase' would traditionally be considered fully reached
+for (j in c:d) {
+
+
+figZ <- gcFitSpline(dat[[timeColumn]], dat[[controlColumn]], gcID = "spline",
+            control = grofit.control())
+lambda <- as.numeric(figZ$parameters$lambda)
+mumax <- as.numeric(figZ$parameters$mu)
+K <- as.numeric(figZ$parameters$A)
+upperbound <- as.numeric(dat[j,1])
+#upperbound <- dat[timeColumn[[j]]
+#AUCraw <- AUC(dat[1:length(dat[[timeColumn]]),1], dat[1:length(dat[[controlColumn]]),controlColumn])
+AUCraw <- AUC(dat[1:j,1], dat[1:j,controlColumn])
+PI <- 0
+IscZ <- 0
+
+storage.vector_figZ <- data.frame( "mumax"= mumax, "K"= K, "lambda"= lambda, "UpperBound" = upperbound, "AUC" = AUCraw, "PI" = PI, "Isc" = IscZ, stringsAsFactors=FALSE)
+
+
+for (i in a:b) {
+if(i != controlColumn) {
+figZ <- gcFitSpline(dat$time, dat[[i]], gcID = "spline444",
+            control = grofit.control())
+#plot(figZ)
+
+lambda <- as.numeric(figZ$parameters$lambda)
+mumax <- as.numeric(figZ$parameters$mu)
+K <- as.numeric(figZ$parameters$A)
+upperbound <- as.numeric(dat[j,1])
+
+  AUCraw <- AUC(dat[1:j,1], dat[1:j,i])
+  if(i == controlColumn) {
+    PI <- 0
+  } else {
+    PI <- (1 - (AUCraw/storage.vector_figZ$AUC[1])) * 100
+  }
+
+  IscZ <-  (1 - sqrt((AUCraw*K)/(storage.vector_figZ$AUC[1]*storage.vector_figZ$K[1]))) * 100
+
+
+storage.vector_figZ <- rbind(storage.vector_figZ, c( mumax, K, lambda, upperbound, as.numeric(AUCraw), PI, as.numeric(IscZ)))
+
+
+}
+}
+#output <- rbind
+if(firstRun == TRUE) {
+  #something
+  firstRun <- FALSE
+  rownames(storage.vector_figZ) <- colnames(dat[-timeColumn])
+  FinalOutPutfigZ <- storage.vector_figZ
+} else {
+  rownames(storage.vector_figZ) <- colnames(dat[-timeColumn])
+  FinalOutPutfigZ <- rbind(FinalOutPutfigZ, storage.vector_figZ)
+}
+
+}
+#storage.vector_figZ <- storage.vector_figZ[-c(1), ]
+
+#storage.vector_figZ
+#Below code to get rid of scientific notation:
+options(scipen=999)
+#here is how to get back to scientific notation: options(scipen=0)
+
+
+
+library(data.table)
+setDT(FinalOutPutfigZ, keep.rownames = TRUE)
+#here I'm fixing the group names to not say replicates
+# FinalOutPutfigZ$rn <- c(str_replace_all(string=FinalOutPutfigZ$rn,pattern="\\l.*$",replacement="l"))
+FinalOutPutfigZ$rn <- substr(FinalOutPutfigZ$rn, 1, trim)
+# df$col1 <- strtrim(df$col, 1, 1)
+
+IscOrderedOutputFigZ <- FinalOutPutfigZ %>%
+  arrange((Isc))
+
+
+
+if (exists("maxIsc") == TRUE) {
+  save(FinalOutPutfigZ,file="FinalOutPutfigZ.Rda")
+} else {
+maxIsc <- IscOrderedOutputFigZ[1,1]
+}
+# }
+
+# for writing a data.frame or list of data.frames to an xlsx file
+#write.xlsx(FinalOutPutfigZ, 'Isc_figZISC.xlsx')
+#FinalOutPUtfigZsave <- FinalOutPutfigZ
+
+IscOrderedOutputFigZ
+
+
+
+
+
+
+
+
+
+gdIsc <- FinalOutPutfigZ %>%
+        group_by(rn, UpperBound) %>%
+        filter(UpperBound <= t_stationary) %>%
+        summarise(Isc = mean(Isc))
+gdVr <- gdIsc %>%
+  group_by(rn) %>%
+  summarize(Vr = auc(UpperBound, Isc, type = "spline")/(max(UpperBound) - min(UpperBound)))
+
+gdPI <- FinalOutPutfigZ %>%
+        group_by(rn) %>%
+        summarise(PI = mean(PI))
+
+AUCfigZ <- FinalOutPutfigZ %>%
+    filter(UpperBound == max(FinalOutPutfigZ$UpperBound)) %>%
+    mutate(rAUC = 100*(AUC/max(AUC))) %>%
+    arrange(rn) %>%
+    select(c(-1,-4, -5, -6, -7, -8))
+AUCfigZ
+
+
+
+trimAUCfigZ <- FinalOutPutfigZ %>%
+    filter(UpperBound == t_stationary) %>%
+    mutate(AUCtrim = 100*(AUC/max(AUC))) %>%
+    arrange(rn) %>%
+    select("AUCtrim")
+
+
+gd <- cbind(gdVr, gdPI, AUCfigZ, trimAUCfigZ)
+gd <- gd[-3]
+gd
+
+gd$virus <- c(
+    rep("CTL", 3),
+    rep("SSV1", 3),
+    rep("SSV8", 3),
+    rep("SSV9", 3),
+    rep("CTL", 1),
+    rep("SSV1", 1),
+    rep("SSV8", 1),
+    rep("SSV9", 1)
+)
+gd$virus_factor <- factor(gd$virus, levels = c("CTL", "SSV1", "SSV8", "SSV9", "SSV20", "SSV21", "SSV22"))
+# gd$virus <- c(
+#     rep("asnC", 12),
+#     rep("ura3_1", 12),
+#     rep("asnC", 12),
+#     rep("ura3_1", 12),
+#     rep("ura3_2", 12),
+#     rep("idr1_1", 12),
+#     rep("idr2_1", 12),
+#     rep("sirR_1", 12),
+#     rep("ura3_2", 12),
+#     rep("idr1_1", 12),
+#     rep("idr2_1", 12),
+#     rep("sirR_1", 12),
+#     rep("rosR", 12),
+#     rep("ura3_3", 12),
+#     rep("rosR", 12),
+#     rep("ura3_3", 12),
+#     rep("trmB", 12),
+#     rep("VNG1179", 12),
+#     rep("ura3_4", 12),
+#     rep("trmB", 12),
+#     rep("VNG1179", 12),
+#     rep("ura3_4", 12)
+# )
+
+gd$host <- c(
+    rep("S437", 16)
+)
+
+gd437 <- gd
+
+ggplot(data = NULL, aes(x = gd$PI, y = gd$Vr)) +
+  geom_point() +
+  geom_smooth(method = "lm") +
+  geom_abline() +
+  theme_classic()
+
+
+```
+
+```{r}
+ggplot( data = FinalOutPutfigZ, aes(x = UpperBound, y = Isc, color = as.factor(rn))) +
+  geom_point() +
+  geom_line()  +
+  geom_smooth()
+
+
+ggplot( data = FinalOutPutfigZ, aes(x = UpperBound, y = PI, color = as.factor(rn))) +
+  geom_point() +
+  geom_line()  +
+  geom_smooth()
+
+ggplot( data = FinalOutPutfigZ, aes(x = UpperBound, y = AUC, color = as.factor(rn))) +
+  geom_point() +
+  geom_line() +
+  geom_smooth()
+```
+
+
+```{r}
+
+
+ggplot(data = gd, aes(x = Vr, y = mumax, color = as.factor(virus))) +
+  geom_point() +
+  #geom_smooth(method = "lm") +
+  #scale_color_gradientn(colours = rainbow(6)) +
+  # facet_wrap(~host) +
+  theme_bw()
+
+ggplot(data = gd, aes(y = PI, x = Vr, color = as.factor(virus))) +
+  geom_point() +
+  #geom_smooth(method = "lm") +
+  #scale_color_gradientn(colours = rainbow(6)) +
+  # facet_wrap(~host) +
+  theme_bw()
+
+ggplot(data = gd, aes(y = mumax, x = PI, color = as.factor(virus))) +
+  geom_point() +
+  #geom_smooth(method = "lm") +
+  #scale_color_gradientn(colours = rainbow(6)) +
+  # facet_wrap(~host) +
+  theme_bw()
+
+ggplot(data = gd, aes(y = mumax, x = rAUC, color =  as.factor(virus))) +
+  geom_point() +
+  #geom_smooth(method = "lm") +
+  #scale_color_gradientn(colours = rainbow(6)) +
+  # facet_wrap(~host) +
+  theme_bw() +
+    scale_x_reverse()
+
+ggplot(data = gd, aes(y = rAUC, x = Vr, color =  as.factor(virus))) +
+  geom_point() +
+  #geom_smooth(method = "lm") +
+  #scale_color_gradientn(colours = rainbow(6)) +
+  # facet_wrap(~host) +
+  theme_bw()
+
+ggplot(data = gd, aes(y = K, x = Vr, color = as.factor(virus))) +
+  geom_point() +
+  #geom_smooth(method = "lm") +
+  #scale_color_gradientn(colours = rainbow(6)) +
+  # facet_wrap(~host) +
+  theme_bw()
+
+ggplot(data = gd, aes(y = K, x = PI, color = as.factor(virus))) +
+  geom_point() +
+  #geom_smooth(method = "lm") +
+  #scale_color_gradientn(colours = rainbow(6)) +
+  # facet_wrap(~host) +
+  theme_bw()
+
+ggplot(data = gd, aes(y = K, x = rAUC, color = as.factor(virus))) +
+  geom_point() +
+  #geom_smooth(method = "lm") +
+  #scale_color_gradientn(colours = rainbow(6)) +
+  # facet_wrap(~host) +
+  theme_bw()
+
+ggplot(data = gd, aes(x = K, y = mumax, color = as.factor(virus))) +
+  geom_point() +
+  #geom_smooth(method = "lm") +
+  #scale_color_gradientn(colours = rainbow(6)) +
+  # facet_wrap(~host) +
+  theme_bw() +
+    scale_x_reverse()
+
+```
+
+
+
+
+
+
+
+
+#now for other hosts (S444)
+
+
+
+```{r}
+library(tidyverse)
+library(DescTools)
+library(MESS)
+library(grofit)
+library(readxl)
+
+# Week_2_Growthcurver_S1_parameters <- read_excel("~/Downloads/Week 2 - Growthcurver S1 parameters.xlsx")
+
+# if (file.exists("FinalOutPutfigZ.Rda")) {
+#   load("FinalOutPutfigZ.Rda")
+# } else {
+
+options(scipen = 999)
+
+#IMPORT DATA HERE AS DATA.FRAME
+
+# dat <- read_csv("~/Downloads/Supplemental_Table_S1_ready.csv")
+dat <- read_excel(here("/Data/Processed/Sulfolobus/Sulfolobus_Infection_Growth_Curves.xlsx"), sheet = "S444")
+
+dat <- as.data.frame(dat[complete.cases(dat),])
+
+###########3
+####hard coded: remove!
+# dat[1,11] <- 0.07
+###########
+##########
+
+trim <- 15
+
+colnames(dat)[1] <- "time"
+
+colnames(dat)[-1] <- str_pad(colnames(dat)[-1], trim, pad = "0", side = "left" )
+
+
+
+
+# maxbyrowraw <- colnames(dat[-1])[max.col(dat[-1],ties.method="random")]
+# maxbyrowconvert <- as.data.frame(table(maxbyrowraw))
+# maxbyrowcount <- arrange(maxbyrowconvert,-Freq)
+# maxmax <- as.character(maxbyrowcount$maxbyrowraw[1])
+
+#note: should always be 1 (first column)
+
+timeColumn <- 1
+#can be adjsuted. average of ctl replicates is recommended based on zero science (seems like a good start).
+controlColumn <- 5
+#shouldn't change unless time column != 1
+a <- 2
+#ADJUST ME: total number of curves in table + 1
+b <- ncol(dat)
+#What is the timepoint at which stationary phase is reached?
+t_stationary <- 26
+
+firstRun <- TRUE
+c <- 2
+d <- length(dat[[timeColumn]])
+#d <- 20 #this is where 'stationary phase' would traditionally be considered fully reached
+for (j in c:d) {
+
+
+figZ <- gcFitSpline(dat[[timeColumn]], dat[[controlColumn]], gcID = "spline",
+            control = grofit.control())
+lambda <- as.numeric(figZ$parameters$lambda)
+mumax <- as.numeric(figZ$parameters$mu)
+K <- as.numeric(figZ$parameters$A)
+upperbound <- as.numeric(dat[j,1])
+#upperbound <- dat[timeColumn[[j]]
+#AUCraw <- AUC(dat[1:length(dat[[timeColumn]]),1], dat[1:length(dat[[controlColumn]]),controlColumn])
+AUCraw <- AUC(dat[1:j,1], dat[1:j,controlColumn])
+PI <- 0
+IscZ <- 0
+
+storage.vector_figZ <- data.frame( "mumax"= mumax, "K"= K, "lambda"= lambda, "UpperBound" = upperbound, "AUC" = AUCraw, "PI" = PI, "Isc" = IscZ, stringsAsFactors=FALSE)
+
+
+for (i in a:b) {
+if(i != controlColumn) {
+figZ <- gcFitSpline(dat$time, dat[[i]], gcID = "spline444",
+            control = grofit.control())
+#plot(figZ)
+
+lambda <- as.numeric(figZ$parameters$lambda)
+mumax <- as.numeric(figZ$parameters$mu)
+K <- as.numeric(figZ$parameters$A)
+upperbound <- as.numeric(dat[j,1])
+
+  AUCraw <- AUC(dat[1:j,1], dat[1:j,i])
+  if(i == controlColumn) {
+    PI <- 0
+  } else {
+    PI <- (1 - (AUCraw/storage.vector_figZ$AUC[1])) * 100
+  }
+
+  IscZ <-  (1 - sqrt((AUCraw*K)/(storage.vector_figZ$AUC[1]*storage.vector_figZ$K[1]))) * 100
+
+
+storage.vector_figZ <- rbind(storage.vector_figZ, c( mumax, K, lambda, upperbound, as.numeric(AUCraw), PI, as.numeric(IscZ)))
+
+
+}
+}
+#output <- rbind
+if(firstRun == TRUE) {
+  #something
+  firstRun <- FALSE
+  rownames(storage.vector_figZ) <- colnames(dat[-timeColumn])
+  FinalOutPutfigZ <- storage.vector_figZ
+} else {
+  rownames(storage.vector_figZ) <- colnames(dat[-timeColumn])
+  FinalOutPutfigZ <- rbind(FinalOutPutfigZ, storage.vector_figZ)
+}
+
+}
+#storage.vector_figZ <- storage.vector_figZ[-c(1), ]
+
+#storage.vector_figZ
+#Below code to get rid of scientific notation:
+options(scipen=999)
+#here is how to get back to scientific notation: options(scipen=0)
+
+
+
+library(data.table)
+setDT(FinalOutPutfigZ, keep.rownames = TRUE)
+#here I'm fixing the group names to not say replicates
+# FinalOutPutfigZ$rn <- c(str_replace_all(string=FinalOutPutfigZ$rn,pattern="\\l.*$",replacement="l"))
+FinalOutPutfigZ$rn <- substr(FinalOutPutfigZ$rn, 1, trim)
+# df$col1 <- strtrim(df$col, 1, 1)
+
+IscOrderedOutputFigZ <- FinalOutPutfigZ %>%
+  arrange((Isc))
+
+
+
+if (exists("maxIsc") == TRUE) {
+  save(FinalOutPutfigZ,file="FinalOutPutfigZ.Rda")
+} else {
+maxIsc <- IscOrderedOutputFigZ[1,1]
+}
+# }
+
+# for writing a data.frame or list of data.frames to an xlsx file
+#write.xlsx(FinalOutPutfigZ, 'Isc_figZISC.xlsx')
+#FinalOutPUtfigZsave <- FinalOutPutfigZ
+
+IscOrderedOutputFigZ
+
+
+
+
+
+
+
+
+
+gdIsc <- FinalOutPutfigZ %>%
+        group_by(rn, UpperBound) %>%
+        #group_by(UpperBound) %>%
+        summarise(Isc = mean(Isc))
+gdVr <- gdIsc %>%
+  group_by(rn) %>%
+  summarize(Vr = auc(UpperBound, Isc, type = "spline")/(max(UpperBound) - min(UpperBound)))
+
+gdPI <- FinalOutPutfigZ %>%
+        group_by(rn) %>%
+        summarise(PI = mean(PI))
+
+AUCfigZ <- FinalOutPutfigZ %>%
+    filter(UpperBound == max(FinalOutPutfigZ$UpperBound)) %>%
+    mutate(rAUC = 100*(AUC/max(AUC))) %>%
+    arrange(rn) %>%
+    select(c(-1,-4, -5, -6, -7, -8))
+AUCfigZ
+
+
+
+trimAUCfigZ <- FinalOutPutfigZ %>%
+    filter(UpperBound == t_stationary) %>%
+    mutate(AUCtrim = 100*(AUC/max(AUC))) %>%
+    arrange(rn) %>%
+    select("AUCtrim")
+
+
+gd <- cbind(gdVr, gdPI, AUCfigZ, trimAUCfigZ)
+gd <- gd[-3]
+gd
+
+gd$virus <- c(
+    rep("CTL", 3),
+    rep("SSV1", 3),
+    rep("SSV8", 3),
+    rep("SSV9", 3),
+    rep("CTL", 1),
+    rep("SSV1", 1),
+    rep("SSV8", 1),
+    rep("SSV9", 1)
+)
+gd$virus_factor <- factor(gd$virus, levels = c("CTL", "SSV1", "SSV8", "SSV9", "SSV20", "SSV21", "SSV22"))
+# gd$virus <- c(
+#     rep("asnC", 12),
+#     rep("ura3_1", 12),
+#     rep("asnC", 12),
+#     rep("ura3_1", 12),
+#     rep("ura3_2", 12),
+#     rep("idr1_1", 12),
+#     rep("idr2_1", 12),
+#     rep("sirR_1", 12),
+#     rep("ura3_2", 12),
+#     rep("idr1_1", 12),
+#     rep("idr2_1", 12),
+#     rep("sirR_1", 12),
+#     rep("rosR", 12),
+#     rep("ura3_3", 12),
+#     rep("rosR", 12),
+#     rep("ura3_3", 12),
+#     rep("trmB", 12),
+#     rep("VNG1179", 12),
+#     rep("ura3_4", 12),
+#     rep("trmB", 12),
+#     rep("VNG1179", 12),
+#     rep("ura3_4", 12)
+# )
+
+gd$host <- c(
+    rep("S444", 16)
+)
+
+gd444 <- gd
+
+ggplot(data = NULL, aes(x = gd$PI, y = gd$Vr)) +
+  geom_point() +
+  geom_smooth(method = "lm") +
+  geom_abline() +
+  theme_classic()
+
+
+```
+
+
+
+```{r}
+
+
+ggplot(data = gd, aes(x = Vr, y = mumax, color = as.factor(virus))) +
+  geom_point() +
+  #geom_smooth(method = "lm") +
+  #scale_color_gradientn(colours = rainbow(6)) +
+  # facet_wrap(~host) +
+  theme_bw()
+
+ggplot(data = gd, aes(y = PI, x = Vr, color = as.factor(virus))) +
+  geom_point() +
+  #geom_smooth(method = "lm") +
+  #scale_color_gradientn(colours = rainbow(6)) +
+  # facet_wrap(~host) +
+  theme_bw()
+
+ggplot(data = gd, aes(y = mumax, x = PI, color = as.factor(virus))) +
+  geom_point() +
+  #geom_smooth(method = "lm") +
+  #scale_color_gradientn(colours = rainbow(6)) +
+  # facet_wrap(~host) +
+  theme_bw()
+
+ggplot(data = gd, aes(y = mumax, x = rAUC, color =  as.factor(virus))) +
+  geom_point() +
+  #geom_smooth(method = "lm") +
+  #scale_color_gradientn(colours = rainbow(6)) +
+  # facet_wrap(~host) +
+  theme_bw() +
+    scale_x_reverse()
+
+ggplot(data = gd, aes(y = rAUC, x = Vr, color =  as.factor(virus))) +
+  geom_point() +
+  #geom_smooth(method = "lm") +
+  #scale_color_gradientn(colours = rainbow(6)) +
+  # facet_wrap(~host) +
+  theme_bw()
+
+ggplot(data = gd, aes(y = K, x = Vr, color = as.factor(virus))) +
+  geom_point() +
+  #geom_smooth(method = "lm") +
+  #scale_color_gradientn(colours = rainbow(6)) +
+  # facet_wrap(~host) +
+  theme_bw()
+
+ggplot(data = gd, aes(y = K, x = PI, color = as.factor(virus))) +
+  geom_point() +
+  #geom_smooth(method = "lm") +
+  #scale_color_gradientn(colours = rainbow(6)) +
+  # facet_wrap(~host) +
+  theme_bw()
+
+ggplot(data = gd, aes(y = K, x = rAUC, color = as.factor(virus))) +
+  geom_point() +
+  #geom_smooth(method = "lm") +
+  #scale_color_gradientn(colours = rainbow(6)) +
+  # facet_wrap(~host) +
+  theme_bw()
+
+ggplot(data = gd, aes(x = K, y = mumax, color = as.factor(virus))) +
+  geom_point() +
+  #geom_smooth(method = "lm") +
+  #scale_color_gradientn(colours = rainbow(6)) +
+  # facet_wrap(~host) +
+  theme_bw() +
+    scale_x_reverse()
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+NOw for S200
+
+```{r}
+library(tidyverse)
+library(DescTools)
+library(MESS)
+library(grofit)
+library(readxl)
+
+# Week_2_Growthcurver_S1_parameters <- read_excel("~/Downloads/Week 2 - Growthcurver S1 parameters.xlsx")
+
+# if (file.exists("FinalOutPutfigZ.Rda")) {
+#   load("FinalOutPutfigZ.Rda")
+# } else {
+
+options(scipen = 999)
+
+#IMPORT DATA HERE AS DATA.FRAME
+
+# dat <- read_csv("~/Downloads/Supplemental_Table_S1_ready.csv")
+dat <- read_excel(here("/Data/Processed/Sulfolobus/Sulfolobus_Infection_Growth_Curves.xlsx"), sheet = "S200")
+
+dat <- as.data.frame(dat[complete.cases(dat),])
+
+###########3
+####hard coded: remove!
+# dat[1,11] <- 0.07
+###########
+##########
+
+trim <- 15
+
+colnames(dat)[1] <- "time"
+
+colnames(dat)[-1] <- str_pad(colnames(dat)[-1], trim, pad = "0", side = "left" )
+
+
+
+
+# maxbyrowraw <- colnames(dat[-1])[max.col(dat[-1],ties.method="random")]
+# maxbyrowconvert <- as.data.frame(table(maxbyrowraw))
+# maxbyrowcount <- arrange(maxbyrowconvert,-Freq)
+# maxmax <- as.character(maxbyrowcount$maxbyrowraw[1])
+
+#note: should always be 1 (first column)
+
+timeColumn <- 1
+#can be adjsuted. average of ctl replicates is recommended based on zero science (seems like a good start).
+controlColumn <- 5
+#shouldn't change unless time column != 1
+a <- 2
+#ADJUST ME: total number of curves in table + 1
+b <- ncol(dat)
+#What is the timepoint at which stationary phase is reached?
+t_stationary <- 26
+
+firstRun <- TRUE
+c <- 2
+d <- length(dat[[timeColumn]])
+#d <- 20 #this is where 'stationary phase' would traditionally be considered fully reached
+for (j in c:d) {
+
+
+figZ <- gcFitSpline(dat[[timeColumn]], dat[[controlColumn]], gcID = "spline",
+            control = grofit.control())
+lambda <- as.numeric(figZ$parameters$lambda)
+mumax <- as.numeric(figZ$parameters$mu)
+K <- as.numeric(figZ$parameters$A)
+upperbound <- as.numeric(dat[j,1])
+#upperbound <- dat[timeColumn[[j]]
+#AUCraw <- AUC(dat[1:length(dat[[timeColumn]]),1], dat[1:length(dat[[controlColumn]]),controlColumn])
+AUCraw <- AUC(dat[1:j,1], dat[1:j,controlColumn])
+PI <- 0
+IscZ <- 0
+
+storage.vector_figZ <- data.frame( "mumax"= mumax, "K"= K, "lambda"= lambda, "UpperBound" = upperbound, "AUC" = AUCraw, "PI" = PI, "Isc" = IscZ, stringsAsFactors=FALSE)
+
+
+for (i in a:b) {
+if(i != controlColumn) {
+figZ <- gcFitSpline(dat$time, dat[[i]], gcID = "spline444",
+            control = grofit.control())
+#plot(figZ)
+
+lambda <- as.numeric(figZ$parameters$lambda)
+mumax <- as.numeric(figZ$parameters$mu)
+K <- as.numeric(figZ$parameters$A)
+upperbound <- as.numeric(dat[j,1])
+
+  AUCraw <- AUC(dat[1:j,1], dat[1:j,i])
+  if(i == controlColumn) {
+    PI <- 0
+  } else {
+    PI <- (1 - (AUCraw/storage.vector_figZ$AUC[1])) * 100
+  }
+
+  IscZ <-  (1 - sqrt((AUCraw*K)/(storage.vector_figZ$AUC[1]*storage.vector_figZ$K[1]))) * 100
+
+
+storage.vector_figZ <- rbind(storage.vector_figZ, c( mumax, K, lambda, upperbound, as.numeric(AUCraw), PI, as.numeric(IscZ)))
+
+
+}
+}
+#output <- rbind
+if(firstRun == TRUE) {
+  #something
+  firstRun <- FALSE
+  rownames(storage.vector_figZ) <- colnames(dat[-timeColumn])
+  FinalOutPutfigZ <- storage.vector_figZ
+} else {
+  rownames(storage.vector_figZ) <- colnames(dat[-timeColumn])
+  FinalOutPutfigZ <- rbind(FinalOutPutfigZ, storage.vector_figZ)
+}
+
+}
+#storage.vector_figZ <- storage.vector_figZ[-c(1), ]
+
+#storage.vector_figZ
+#Below code to get rid of scientific notation:
+options(scipen=999)
+#here is how to get back to scientific notation: options(scipen=0)
+
+
+
+library(data.table)
+setDT(FinalOutPutfigZ, keep.rownames = TRUE)
+#here I'm fixing the group names to not say replicates
+# FinalOutPutfigZ$rn <- c(str_replace_all(string=FinalOutPutfigZ$rn,pattern="\\l.*$",replacement="l"))
+FinalOutPutfigZ$rn <- substr(FinalOutPutfigZ$rn, 1, trim)
+# df$col1 <- strtrim(df$col, 1, 1)
+
+IscOrderedOutputFigZ <- FinalOutPutfigZ %>%
+  arrange((Isc))
+
+
+
+if (exists("maxIsc") == TRUE) {
+  save(FinalOutPutfigZ,file="FinalOutPutfigZ.Rda")
+} else {
+maxIsc <- IscOrderedOutputFigZ[1,1]
+}
+# }
+
+# for writing a data.frame or list of data.frames to an xlsx file
+#write.xlsx(FinalOutPutfigZ, 'Isc_figZISC.xlsx')
+#FinalOutPUtfigZsave <- FinalOutPutfigZ
+
+IscOrderedOutputFigZ
+
+
+
+
+
+
+
+
+
+gdIsc <- FinalOutPutfigZ %>%
+        group_by(rn, UpperBound) %>%
+        #group_by(UpperBound) %>%
+        summarise(Isc = mean(Isc))
+gdVr <- gdIsc %>%
+  group_by(rn) %>%
+  summarize(Vr = auc(UpperBound, Isc, type = "spline")/(max(UpperBound) - min(UpperBound)))
+
+gdPI <- FinalOutPutfigZ %>%
+        group_by(rn) %>%
+        summarise(PI = mean(PI))
+
+AUCfigZ <- FinalOutPutfigZ %>%
+    filter(UpperBound == max(FinalOutPutfigZ$UpperBound)) %>%
+    mutate(rAUC = 100*(AUC/max(AUC))) %>%
+    arrange(rn) %>%
+    select(c(-1,-4, -5, -6, -7, -8))
+AUCfigZ
+
+
+trimAUCfigZ <- FinalOutPutfigZ %>%
+    filter(UpperBound == t_stationary) %>%
+    mutate(AUCtrim = 100*(AUC/max(AUC))) %>%
+    arrange(rn) %>%
+    select("AUCtrim")
+
+gd <- cbind(gdVr, gdPI, AUCfigZ, trimAUCfigZ)
+gd <- gd[-3]
+gd
+
+gd$virus <- c(
+    rep("CTL", 3),
+    rep("SSV1", 3),
+    rep("SSV8", 3),
+    rep("SSV9", 3),
+    rep("CTL", 1),
+    rep("SSV1", 1),
+    rep("SSV8", 1),
+    rep("SSV9", 1)
+)
+gd$virus_factor <- factor(gd$virus, levels = c("CTL", "SSV1", "SSV8", "SSV9", "SSV20", "SSV21", "SSV22"))
+# gd$virus <- c(
+#     rep("asnC", 12),
+#     rep("ura3_1", 12),
+#     rep("asnC", 12),
+#     rep("ura3_1", 12),
+#     rep("ura3_2", 12),
+#     rep("idr1_1", 12),
+#     rep("idr2_1", 12),
+#     rep("sirR_1", 12),
+#     rep("ura3_2", 12),
+#     rep("idr1_1", 12),
+#     rep("idr2_1", 12),
+#     rep("sirR_1", 12),
+#     rep("rosR", 12),
+#     rep("ura3_3", 12),
+#     rep("rosR", 12),
+#     rep("ura3_3", 12),
+#     rep("trmB", 12),
+#     rep("VNG1179", 12),
+#     rep("ura3_4", 12),
+#     rep("trmB", 12),
+#     rep("VNG1179", 12),
+#     rep("ura3_4", 12)
+# )
+
+gd$host <- c(
+    rep("S200", 16)
+)
+
+
+gd200 <- gd
+
+ggplot(data = NULL, aes(x = gd$PI, y = gd$Vr)) +
+  geom_point() +
+  geom_smooth(method = "lm") +
+  geom_abline() +
+  theme_classic()
+
+
+```
+
+
+
+```{r}
+
+
+ggplot(data = gd, aes(x = Vr, y = mumax, color = as.factor(virus))) +
+  geom_point() +
+  #geom_smooth(method = "lm") +
+  #scale_color_gradientn(colours = rainbow(6)) +
+  # facet_wrap(~host) +
+  theme_bw()
+
+ggplot(data = gd, aes(y = PI, x = Vr, color = as.factor(virus))) +
+  geom_point() +
+  #geom_smooth(method = "lm") +
+  #scale_color_gradientn(colours = rainbow(6)) +
+  # facet_wrap(~host) +
+  theme_bw()
+
+ggplot(data = gd, aes(y = mumax, x = PI, color = as.factor(virus))) +
+  geom_point() +
+  #geom_smooth(method = "lm") +
+  #scale_color_gradientn(colours = rainbow(6)) +
+  # facet_wrap(~host) +
+  theme_bw()
+
+ggplot(data = gd, aes(y = mumax, x = rAUC, color =  as.factor(virus))) +
+  geom_point() +
+  #geom_smooth(method = "lm") +
+  #scale_color_gradientn(colours = rainbow(6)) +
+  # facet_wrap(~host) +
+  theme_bw() +
+    scale_x_reverse()
+
+ggplot(data = gd, aes(y = rAUC, x = Vr, color =  as.factor(virus))) +
+  geom_point() +
+  #geom_smooth(method = "lm") +
+  #scale_color_gradientn(colours = rainbow(6)) +
+  # facet_wrap(~host) +
+  theme_bw()
+
+ggplot(data = gd, aes(y = K, x = Vr, color = as.factor(virus))) +
+  geom_point() +
+  #geom_smooth(method = "lm") +
+  #scale_color_gradientn(colours = rainbow(6)) +
+  # facet_wrap(~host) +
+  theme_bw()
+
+ggplot(data = gd, aes(y = K, x = PI, color = as.factor(virus))) +
+  geom_point() +
+  #geom_smooth(method = "lm") +
+  #scale_color_gradientn(colours = rainbow(6)) +
+  # facet_wrap(~host) +
+  theme_bw()
+
+ggplot(data = gd, aes(y = K, x = rAUC, color = as.factor(virus))) +
+  geom_point() +
+  #geom_smooth(method = "lm") +
+  #scale_color_gradientn(colours = rainbow(6)) +
+  # facet_wrap(~host) +
+  theme_bw()
+
+ggplot(data = gd, aes(x = K, y = mumax, color = as.factor(virus))) +
+  geom_point() +
+  #geom_smooth(method = "lm") +
+  #scale_color_gradientn(colours = rainbow(6)) +
+  # facet_wrap(~host) +
+  theme_bw() +
+    scale_x_reverse()
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+S147
+
+```{r}
+library(tidyverse)
+library(DescTools)
+library(MESS)
+library(grofit)
+library(readxl)
+
+# Week_2_Growthcurver_S1_parameters <- read_excel("~/Downloads/Week 2 - Growthcurver S1 parameters.xlsx")
+
+# if (file.exists("FinalOutPutfigZ.Rda")) {
+#   load("FinalOutPutfigZ.Rda")
+# } else {
+
+options(scipen = 999)
+
+#IMPORT DATA HERE AS DATA.FRAME
+
+# dat <- read_csv("~/Downloads/Supplemental_Table_S1_ready.csv")
+dat <- read_excel(here("/Data/Processed/Sulfolobus/Sulfolobus_Infection_Growth_Curves.xlsx"), sheet = "S150S147")
+
+dat <- as.data.frame(dat[complete.cases(dat),])
+
+#now remove S150 columns
+dat <- dat[-c(2:9)]
+
+###########3
+####hard coded: remove!
+# dat[1,11] <- 0.07
+###########
+##########
+
+#tells us the number of digits to make the names, always needs to be longer than length of col names
+trim <- 15
+
+colnames(dat)[1] <- "time"
+
+colnames(dat)[-1] <- str_pad(colnames(dat)[-1], trim, pad = "0", side = "left" )
+
+
+
+
+# maxbyrowraw <- colnames(dat[-1])[max.col(dat[-1],ties.method="random")]
+# maxbyrowconvert <- as.data.frame(table(maxbyrowraw))
+# maxbyrowcount <- arrange(maxbyrowconvert,-Freq)
+# maxmax <- as.character(maxbyrowcount$maxbyrowraw[1])
+
+#note: should always be 1 (first column)
+
+timeColumn <- 1
+#can be adjsuted. average of ctl replicates is recommended based on zero science (seems like a good start).
+controlColumn <- 5
+#shouldn't change unless time column != 1
+a <- 2
+#ADJUST ME: total number of curves in table + 1
+b <- ncol(dat)
+
+#What is the timepoint at which stationary phase is reached?
+t_stationary <- 26
+
+
+firstRun <- TRUE
+c <- 2
+d <- length(dat[[timeColumn]])
+#d <- 20 #this is where 'stationary phase' would traditionally be considered fully reached
+for (j in c:d) {
+
+
+figZ <- gcFitSpline(dat[[timeColumn]], dat[[controlColumn]], gcID = "spline",
+            control = grofit.control())
+lambda <- as.numeric(figZ$parameters$lambda)
+mumax <- as.numeric(figZ$parameters$mu)
+K <- as.numeric(figZ$parameters$A)
+upperbound <- as.numeric(dat[j,1])
+#upperbound <- dat[timeColumn[[j]]
+#AUCraw <- AUC(dat[1:length(dat[[timeColumn]]),1], dat[1:length(dat[[controlColumn]]),controlColumn])
+AUCraw <- AUC(dat[1:j,1], dat[1:j,controlColumn])
+PI <- 0
+IscZ <- 0
+
+storage.vector_figZ <- data.frame( "mumax"= mumax, "K"= K, "lambda"= lambda, "UpperBound" = upperbound, "AUC" = AUCraw, "PI" = PI, "Isc" = IscZ, stringsAsFactors=FALSE)
+
+
+for (i in a:b) {
+if(i != controlColumn) {
+figZ <- gcFitSpline(dat$time, dat[[i]], gcID = "spline444",
+            control = grofit.control())
+#plot(figZ)
+
+lambda <- as.numeric(figZ$parameters$lambda)
+mumax <- as.numeric(figZ$parameters$mu)
+K <- as.numeric(figZ$parameters$A)
+upperbound <- as.numeric(dat[j,1])
+
+  AUCraw <- AUC(dat[1:j,1], dat[1:j,i])
+  if(i == controlColumn) {
+    PI <- 0
+  } else {
+    PI <- (1 - (AUCraw/storage.vector_figZ$AUC[1])) * 100
+  }
+
+  IscZ <-  (1 - sqrt((AUCraw*K)/(storage.vector_figZ$AUC[1]*storage.vector_figZ$K[1]))) * 100
+
+
+storage.vector_figZ <- rbind(storage.vector_figZ, c( mumax, K, lambda, upperbound, as.numeric(AUCraw), PI, as.numeric(IscZ)))
+
+
+}
+}
+#output <- rbind
+if(firstRun == TRUE) {
+  #something
+  firstRun <- FALSE
+  rownames(storage.vector_figZ) <- colnames(dat[-timeColumn])
+  FinalOutPutfigZ <- storage.vector_figZ
+} else {
+  rownames(storage.vector_figZ) <- colnames(dat[-timeColumn])
+  FinalOutPutfigZ <- rbind(FinalOutPutfigZ, storage.vector_figZ)
+}
+
+}
+#storage.vector_figZ <- storage.vector_figZ[-c(1), ]
+
+#storage.vector_figZ
+#Below code to get rid of scientific notation:
+options(scipen=999)
+#here is how to get back to scientific notation: options(scipen=0)
+
+
+
+library(data.table)
+setDT(FinalOutPutfigZ, keep.rownames = TRUE)
+#here I'm fixing the group names to not say replicates
+# FinalOutPutfigZ$rn <- c(str_replace_all(string=FinalOutPutfigZ$rn,pattern="\\l.*$",replacement="l"))
+FinalOutPutfigZ$rn <- substr(FinalOutPutfigZ$rn, 1, trim)
+# df$col1 <- strtrim(df$col, 1, 1)
+
+IscOrderedOutputFigZ <- FinalOutPutfigZ %>%
+  arrange((Isc))
+
+
+
+if (exists("maxIsc") == TRUE) {
+  save(FinalOutPutfigZ,file="FinalOutPutfigZ.Rda")
+} else {
+maxIsc <- IscOrderedOutputFigZ[1,1]
+}
+# }
+
+# for writing a data.frame or list of data.frames to an xlsx file
+#write.xlsx(FinalOutPutfigZ, 'Isc_figZISC.xlsx')
+#FinalOutPUtfigZsave <- FinalOutPutfigZ
+
+IscOrderedOutputFigZ
+
+
+
+
+
+
+
+
+
+gdIsc <- FinalOutPutfigZ %>%
+        group_by(rn, UpperBound) %>%
+        #group_by(UpperBound) %>%
+        summarise(Isc = mean(Isc))
+gdVr <- gdIsc %>%
+  group_by(rn) %>%
+  summarize(Vr = auc(UpperBound, Isc, type = "spline")/(max(UpperBound) - min(UpperBound)))
+
+gdPI <- FinalOutPutfigZ %>%
+        group_by(rn) %>%
+        summarise(PI = mean(PI))
+
+AUCfigZ <- FinalOutPutfigZ %>%
+    filter(UpperBound == max(FinalOutPutfigZ$UpperBound)) %>%
+    mutate(rAUC = 100*(AUC/max(AUC))) %>%
+    arrange(rn) %>%
+    select(c(-1,-4, -5, -6, -7, -8))
+AUCfigZ
+
+trimAUCfigZ <- FinalOutPutfigZ %>%
+    filter(UpperBound == t_stationary) %>%
+    mutate(AUCtrim = 100*(AUC/max(AUC))) %>%
+    arrange(rn) %>%
+    select("AUCtrim")
+
+
+gd <- cbind(gdVr, gdPI, AUCfigZ, trimAUCfigZ)
+gd <- gd[-3]
+gd
+
+gd$virus <- c(
+    rep("CTL", 3),
+    rep("SSV9", 3),
+    rep("CTL", 1),
+    rep("SSV9", 1)
+)
+gd$virus_factor <- factor(gd$virus, levels = c("CTL", "SSV1", "SSV8", "SSV9", "SSV20", "SSV21", "SSV22"))
+# gd$virus <- c(
+#     rep("asnC", 12),
+#     rep("ura3_1", 12),
+#     rep("asnC", 12),
+#     rep("ura3_1", 12),
+#     rep("ura3_2", 12),
+#     rep("idr1_1", 12),
+#     rep("idr2_1", 12),
+#     rep("sirR_1", 12),
+#     rep("ura3_2", 12),
+#     rep("idr1_1", 12),
+#     rep("idr2_1", 12),
+#     rep("sirR_1", 12),
+#     rep("rosR", 12),
+#     rep("ura3_3", 12),
+#     rep("rosR", 12),
+#     rep("ura3_3", 12),
+#     rep("trmB", 12),
+#     rep("VNG1179", 12),
+#     rep("ura3_4", 12),
+#     rep("trmB", 12),
+#     rep("VNG1179", 12),
+#     rep("ura3_4", 12)
+# )
+
+gd$host <-  rep("S147", 8)
+
+
+
+gd147 <- gd
+
+
+ggplot(data = NULL, aes(x = gd$PI, y = gd$Vr)) +
+  geom_point() +
+  geom_smooth(method = "lm") +
+  geom_abline() +
+  theme_classic()
+
+
+```
+
+
+
+```{r}
+
+
+ggplot(data = gd, aes(x = Vr, y = mumax, color = as.factor(virus))) +
+  geom_point() +
+  #geom_smooth(method = "lm") +
+  #scale_color_gradientn(colours = rainbow(6)) +
+  facet_wrap(~host) +
+  theme_bw()
+
+ggplot(data = gd, aes(y = PI, x = Vr, color = as.factor(virus))) +
+  geom_point() +
+  #geom_smooth(method = "lm") +
+  #scale_color_gradientn(colours = rainbow(6)) +
+  facet_wrap(~host) +
+  theme_bw()
+
+ggplot(data = gd, aes(y = mumax, x = PI, color = as.factor(virus))) +
+  geom_point() +
+  #geom_smooth(method = "lm") +
+  #scale_color_gradientn(colours = rainbow(6)) +
+  facet_wrap(~host) +
+  theme_bw()
+
+ggplot(data = gd, aes(y = mumax, x = rAUC, color =  as.factor(virus))) +
+  geom_point() +
+  #geom_smooth(method = "lm") +
+  #scale_color_gradientn(colours = rainbow(6)) +
+  facet_wrap(~host) +
+  theme_bw() +
+    scale_x_reverse()
+
+ggplot(data = gd, aes(y = rAUC, x = Vr, color =  as.factor(virus))) +
+  geom_point() +
+  #geom_smooth(method = "lm") +
+  #scale_color_gradientn(colours = rainbow(6)) +
+  facet_wrap(~host) +
+  theme_bw()
+
+ggplot(data = gd, aes(y = K, x = Vr, color = as.factor(virus))) +
+  geom_point() +
+  #geom_smooth(method = "lm") +
+  #scale_color_gradientn(colours = rainbow(6)) +
+  facet_wrap(~host) +
+  theme_bw()
+
+ggplot(data = gd, aes(y = K, x = PI, color = as.factor(virus))) +
+  geom_point() +
+  #geom_smooth(method = "lm") +
+  #scale_color_gradientn(colours = rainbow(6)) +
+  facet_wrap(~host) +
+  theme_bw()
+
+ggplot(data = gd, aes(y = K, x = rAUC, color = as.factor(virus))) +
+  geom_point() +
+  #geom_smooth(method = "lm") +
+  #scale_color_gradientn(colours = rainbow(6)) +
+  # facet_wrap(~host) +
+  theme_bw()
+
+ggplot(data = gd, aes(x = K, y = mumax, color = as.factor(virus))) +
+  geom_point() +
+  #geom_smooth(method = "lm") +
+  #scale_color_gradientn(colours = rainbow(6)) +
+  facet_wrap(~host) +
+  theme_bw() +
+    scale_x_reverse()
+
+```
+
+
+
+
+S150
+
+```{r}
+library(tidyverse)
+library(DescTools)
+library(MESS)
+library(grofit)
+library(readxl)
+
+# Week_2_Growthcurver_S1_parameters <- read_excel("~/Downloads/Week 2 - Growthcurver S1 parameters.xlsx")
+
+# if (file.exists("FinalOutPutfigZ.Rda")) {
+#   load("FinalOutPutfigZ.Rda")
+# } else {
+
+options(scipen = 999)
+
+#IMPORT DATA HERE AS DATA.FRAME
+
+# dat <- read_csv("~/Downloads/Supplemental_Table_S1_ready.csv")
+dat <- read_excel(here("/Data/Processed/Sulfolobus/Sulfolobus_Infection_Growth_Curves.xlsx"), sheet = "S150S147")
+
+dat <- as.data.frame(dat[complete.cases(dat),])
+
+#now remove S147 columns
+dat <- dat[-c(10:18)]
+
+###########3
+####hard coded: remove!
+# dat[1,11] <- 0.07
+###########
+##########
+
+#tells us the number of digits to make the names, always needs to be longer than length of col names
+trim <- 15
+
+colnames(dat)[1] <- "time"
+
+colnames(dat)[-1] <- str_pad(colnames(dat)[-1], trim, pad = "0", side = "left" )
+
+
+
+
+# maxbyrowraw <- colnames(dat[-1])[max.col(dat[-1],ties.method="random")]
+# maxbyrowconvert <- as.data.frame(table(maxbyrowraw))
+# maxbyrowcount <- arrange(maxbyrowconvert,-Freq)
+# maxmax <- as.character(maxbyrowcount$maxbyrowraw[1])
+
+#note: should always be 1 (first column)
+
+timeColumn <- 1
+#can be adjsuted. average of ctl replicates is recommended based on zero science (seems like a good start).
+controlColumn <- 5
+#shouldn't change unless time column != 1
+a <- 2
+#ADJUST ME: total number of curves in table + 1
+b <- ncol(dat)
+
+#What is the timepoint at which stationary phase is reached?
+t_stationary <- 26
+
+
+firstRun <- TRUE
+c <- 2
+d <- length(dat[[timeColumn]])
+#d <- 20 #this is where 'stationary phase' would traditionally be considered fully reached
+for (j in c:d) {
+
+
+figZ <- gcFitSpline(dat[[timeColumn]], dat[[controlColumn]], gcID = "spline",
+            control = grofit.control())
+lambda <- as.numeric(figZ$parameters$lambda)
+mumax <- as.numeric(figZ$parameters$mu)
+K <- as.numeric(figZ$parameters$A)
+upperbound <- as.numeric(dat[j,1])
+#upperbound <- dat[timeColumn[[j]]
+#AUCraw <- AUC(dat[1:length(dat[[timeColumn]]),1], dat[1:length(dat[[controlColumn]]),controlColumn])
+AUCraw <- AUC(dat[1:j,1], dat[1:j,controlColumn])
+PI <- 0
+IscZ <- 0
+
+storage.vector_figZ <- data.frame( "mumax"= mumax, "K"= K, "lambda"= lambda, "UpperBound" = upperbound, "AUC" = AUCraw, "PI" = PI, "Isc" = IscZ, stringsAsFactors=FALSE)
+
+
+for (i in a:b) {
+if(i != controlColumn) {
+figZ <- gcFitSpline(dat$time, dat[[i]], gcID = "spline444",
+            control = grofit.control())
+#plot(figZ)
+
+lambda <- as.numeric(figZ$parameters$lambda)
+mumax <- as.numeric(figZ$parameters$mu)
+K <- as.numeric(figZ$parameters$A)
+upperbound <- as.numeric(dat[j,1])
+
+  AUCraw <- AUC(dat[1:j,1], dat[1:j,i])
+  if(i == controlColumn) {
+    PI <- 0
+  } else {
+    PI <- (1 - (AUCraw/storage.vector_figZ$AUC[1])) * 100
+  }
+
+  IscZ <-  (1 - sqrt((AUCraw*K)/(storage.vector_figZ$AUC[1]*storage.vector_figZ$K[1]))) * 100
+
+
+storage.vector_figZ <- rbind(storage.vector_figZ, c( mumax, K, lambda, upperbound, as.numeric(AUCraw), PI, as.numeric(IscZ)))
+
+
+}
+}
+#output <- rbind
+if(firstRun == TRUE) {
+  #something
+  firstRun <- FALSE
+  rownames(storage.vector_figZ) <- colnames(dat[-timeColumn])
+  FinalOutPutfigZ <- storage.vector_figZ
+} else {
+  rownames(storage.vector_figZ) <- colnames(dat[-timeColumn])
+  FinalOutPutfigZ <- rbind(FinalOutPutfigZ, storage.vector_figZ)
+}
+
+}
+#storage.vector_figZ <- storage.vector_figZ[-c(1), ]
+
+#storage.vector_figZ
+#Below code to get rid of scientific notation:
+options(scipen=999)
+#here is how to get back to scientific notation: options(scipen=0)
+
+
+
+library(data.table)
+setDT(FinalOutPutfigZ, keep.rownames = TRUE)
+#here I'm fixing the group names to not say replicates
+# FinalOutPutfigZ$rn <- c(str_replace_all(string=FinalOutPutfigZ$rn,pattern="\\l.*$",replacement="l"))
+FinalOutPutfigZ$rn <- substr(FinalOutPutfigZ$rn, 1, trim)
+# df$col1 <- strtrim(df$col, 1, 1)
+
+IscOrderedOutputFigZ <- FinalOutPutfigZ %>%
+  arrange((Isc))
+
+
+
+if (exists("maxIsc") == TRUE) {
+  save(FinalOutPutfigZ,file="FinalOutPutfigZ.Rda")
+} else {
+maxIsc <- IscOrderedOutputFigZ[1,1]
+}
+# }
+
+# for writing a data.frame or list of data.frames to an xlsx file
+#write.xlsx(FinalOutPutfigZ, 'Isc_figZISC.xlsx')
+#FinalOutPUtfigZsave <- FinalOutPutfigZ
+
+IscOrderedOutputFigZ
+
+
+
+
+
+
+
+
+
+gdIsc <- FinalOutPutfigZ %>%
+        group_by(rn, UpperBound) %>%
+        #group_by(UpperBound) %>%
+        summarise(Isc = mean(Isc))
+gdVr <- gdIsc %>%
+  group_by(rn) %>%
+  summarize(Vr = auc(UpperBound, Isc, type = "spline")/(max(UpperBound) - min(UpperBound)))
+
+gdPI <- FinalOutPutfigZ %>%
+        group_by(rn) %>%
+        summarise(PI = mean(PI))
+
+AUCfigZ <- FinalOutPutfigZ %>%
+    filter(UpperBound == max(FinalOutPutfigZ$UpperBound)) %>%
+    mutate(rAUC = 100*(AUC/max(AUC))) %>%
+    arrange(rn) %>%
+    select(c(-1,-4, -5, -6, -7, -8))
+AUCfigZ
+
+trimAUCfigZ <- FinalOutPutfigZ %>%
+    filter(UpperBound == t_stationary) %>%
+    mutate(AUCtrim = 100*(AUC/max(AUC))) %>%
+    arrange(rn) %>%
+    select("AUCtrim")
+
+
+gd <- cbind(gdVr, gdPI, AUCfigZ, trimAUCfigZ)
+gd <- gd[-3]
+gd
+
+gd$virus <- c(
+    rep("CTL", 3),
+    rep("SSV9", 3),
+    rep("CTL", 1),
+    rep("SSV9", 1)
+)
+
+gd$virus_factor <- factor(gd$virus, levels = c("CTL", "SSV1", "SSV8", "SSV9", "SSV20", "SSV21", "SSV22"))
+
+# gd$virus <- c(
+#     rep("asnC", 12),
+#     rep("ura3_1", 12),
+#     rep("asnC", 12),
+#     rep("ura3_1", 12),
+#     rep("ura3_2", 12),
+#     rep("idr1_1", 12),
+#     rep("idr2_1", 12),
+#     rep("sirR_1", 12),
+#     rep("ura3_2", 12),
+#     rep("idr1_1", 12),
+#     rep("idr2_1", 12),
+#     rep("sirR_1", 12),
+#     rep("rosR", 12),
+#     rep("ura3_3", 12),
+#     rep("rosR", 12),
+#     rep("ura3_3", 12),
+#     rep("trmB", 12),
+#     rep("VNG1179", 12),
+#     rep("ura3_4", 12),
+#     rep("trmB", 12),
+#     rep("VNG1179", 12),
+#     rep("ura3_4", 12)
+# )
+
+gd$host <- rep("S150", 8)
+
+
+
+gd150 <- gd
+
+
+ggplot(data = NULL, aes(x = gd$PI, y = gd$Vr)) +
+  geom_point() +
+  geom_smooth(method = "lm") +
+  geom_abline() +
+  theme_classic()
+
+
+```
+
+
+
+
+
+
+
+
+
+```{r}
+gd <- rbind(gd437, gd444, gd200, gd147, gd150, gdZhang)
+options(scipen=0)
+ggscatter(gd, x = "K", y = "Vr", 
+          add = "reg.line", 
+          fill = "virus_factor", 
+          shape = 21, size = 2, 
+          # conf.int = TRUE, 
+          palette = c("black", "orange", "red", "blue", "yellow", "beige", "light green")) +
+  facet_wrap(~host) +
+  stat_cor(label.y = 65, label.x = 0.6, 
+           aes(label = paste(..rr.label.., ..p.label.., sep = "~`,`~")))
+
+
+ggplot(data = gd, aes(x = Vr, y = mumax, color = as.factor(virus))) +
+  geom_point() +
+  #geom_smooth(method = "lm") +
+  #scale_color_gradientn(colours = rainbow(6)) +
+  facet_wrap(~host) +
+  theme_bw()
+
+ggplot(data = gd, aes(y = PI, x = Vr, color = as.factor(virus))) +
+  geom_point() +
+  #geom_smooth(method = "lm") +
+  #scale_color_gradientn(colours = rainbow(6)) +
+  facet_wrap(~host) +
+  theme_bw()
+
+ggplot(data = gd, aes(y = mumax, x = PI, color = as.factor(virus))) +
+  geom_point() +
+  #geom_smooth(method = "lm") +
+  #scale_color_gradientn(colours = rainbow(6)) +
+  facet_wrap(~host) +
+  theme_bw()
+
+ggplot(data = gd, aes(y = mumax, x = rAUC, color =  as.factor(virus))) +
+  geom_point() +
+  #geom_smooth(method = "lm") +
+  #scale_color_gradientn(colours = rainbow(6)) +
+  facet_wrap(~host) +
+  theme_bw() +
+    scale_x_reverse()
+
+ggplot(data = gd, aes(y = mumax, x = AUCtrim, color =  as.factor(virus))) +
+  geom_point() +
+  #geom_smooth(method = "lm") +
+  #scale_color_gradientn(colours = rainbow(6)) +
+  facet_wrap(~host) +
+  theme_bw() +
+    scale_x_reverse()
+
+ggplot(data = gd, aes(y = rAUC, x = Vr, color =  as.factor(virus))) +
+  geom_point() +
+  #geom_smooth(method = "lm") +
+  #scale_color_gradientn(colours = rainbow(6)) +
+  facet_wrap(~host) +
+  theme_bw()
+
+ggplot(data = gd, aes(y = AUCtrim, x = Vr, color =  as.factor(virus))) +
+  geom_point() +
+  #geom_smooth(method = "lm") +
+  #scale_color_gradientn(colours = rainbow(6)) +
+  facet_wrap(~host) +
+  theme_bw()
+
+ggplot(data = gd, aes(y = K, x = Vr, color = as.factor(virus))) +
+  geom_point() +
+  #geom_smooth(method = "lm") +
+  #scale_color_gradientn(colours = rainbow(6)) +
+  facet_wrap(~host) +
+  theme_bw()
+
+ggplot(data = gd, aes(y = K, x = PI, color = as.factor(virus))) +
+  geom_point() +
+  #geom_smooth(method = "lm") +
+  #scale_color_gradientn(colours = rainbow(6)) +
+  facet_wrap(~host) +
+  theme_bw()
+
+ggplot(data = gd, aes(y = K, x = rAUC, color = as.factor(virus))) +
+  geom_point() +
+  #geom_smooth(method = "lm") +
+  #scale_color_gradientn(colours = rainbow(6)) +
+  # facet_wrap(~host) +
+  theme_bw()
+
+ggplot(data = gd, aes(y = K, x = AUCtrim, color = as.factor(virus))) +
+  geom_point() +
+  #geom_smooth(method = "lm") +
+  #scale_color_gradientn(colours = rainbow(6)) +
+  # facet_wrap(~host) +
+  theme_bw()
+
+ggplot(data = gd, aes(x = K, y = mumax, color = as.factor(virus))) +
+  geom_point() +
+  #geom_smooth(method = "lm") +
+  #scale_color_gradientn(colours = rainbow(6)) +
+  facet_wrap(~host) +
+  theme_bw() +
+    scale_x_reverse()
+
+```
+Are AUC values actually skewed?
+```{r}
+ggplot(data = gd, aes(x=rAUC)) +
+  geom_histogram() +
+  facet_wrap(~host, nrow = 1) 
+```
+
+
+```{r fig.height= 3, fig.width=16}
+# Can we do a basic bar graph of different mumax values?
+ggplot(data=gd, aes(y = Vr, x = virus)) +
+    geom_boxplot() +
+    labs(fill="") +
+    facet_wrap(~host, nrow = 1, scales = "free_x") +
+    ylab(expression(V[R])) +
+  theme_bw()
+
+```
+
+```{r}
+ggscatter(gd, x = "AUCtrim", y = "Vr", add = "reg.line") +
+  stat_cor(label.y = 5, 
+           aes(label = paste(..rr.label.., ..p.label.., sep = "~`,`~")))
+
+ggscatter(gd, x = "mumax", y = "Vr", add = "reg.line") +
+  stat_cor(label.y = 5, 
+           aes(label = paste(..rr.label.., ..p.label.., sep = "~`,`~")))
+
+ggscatter(gd, x = "K", y = "Vr", add = "reg.line") +
+  stat_cor(label.y = 5, 
+           aes(label = paste(..rr.label.., ..p.label.., sep = "~`,`~")))
+```
+
+```{r fig.height=11, fig.width=10}
+
+#boxplot comparisons:
+
+ggVr <- ggplot(data=gd, aes(y = Vr, x = virus)) +
+    geom_boxplot() +
+    labs(fill="") +
+    facet_wrap(~host, nrow = 1) +
+    ylab(expression(V[R])) +
+  theme_bw()
+
+
+ggPI <- ggplot(data=gd, aes(y = PI, x = virus)) +
+    geom_boxplot() +
+    labs(fill="") +
+    facet_wrap(~host, nrow = 1) +
+    ylab(expression(bar(PI)[A][U][C])) +
+  theme_bw()
+
+
+ggmu <- ggplot(data=gd, aes(y = mumax, x = virus)) +
+    geom_boxplot() +
+    facet_wrap(~host, nrow = 1)  +
+    scale_y_reverse() +
+    ylab(expression(mu[max])) +
+  theme_bw()
+
+
+ggK <- ggplot(data=gd, aes(y = K, x = virus)) +
+    geom_boxplot() +
+    facet_wrap(~host, nrow = 1)  +
+    scale_y_reverse() +
+    ylab("Max Density (A)") +
+  theme_bw()
+
+
+ggrAUC <- ggplot(data=gd, aes(y = rAUC, x = virus)) +
+    geom_boxplot() +
+    facet_wrap(~host, nrow = 1)  +
+    scale_y_reverse() +
+    ylab("Relative AUC") +
+  theme_bw()
+
+
+ggAUCt <- ggplot(data=gd, aes(y = AUCtrim, x = virus)) +
+    geom_boxplot() +
+    facet_wrap(~host, nrow = 1)  +
+    scale_y_reverse() +
+    ylab("Relative AUC trim") +
+  theme_bw()
+
+
+ggarrange(ggVr, ggPI, ggrAUC, ggAUCt, ggK, ggmu, ncol = 1)
+
+#code to save as an image:
+# ggsave("sulfolobus_all_measures.tiff", path = "Visualizations", units = "in", width = 10, height = 11, dpi=300, compression = "lzw")
+
+```

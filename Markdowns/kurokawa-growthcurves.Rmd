@@ -1,0 +1,293 @@
+---
+title: "Kurokawa"
+author: "Carson Stacy"
+date: "7/7/2020"
+output: pdf_document
+---
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+It looks like this dataset isnt worth my time. too many parts of it don't indicate what they mean. wide variability among replicates, dcan't find any story to tell. what does each even mean? number of sheets is not equal to number of strains in paper. seems like a shit show.
+
+
+
+
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(tidyverse)
+library(DescTools)
+library(MESS)
+#this should normally be commented out, except when knitting. it is where I downloaded grofit b/c it is depreicated now...
+# install.packages("~/Downloads/grofit_1.1.1-1.tar.gz", repos = NULL, type = "source")
+library(grofit)
+library(readxl)
+library(ggpubr)
+library(here)
+library(purrr)
+require(reshape2)
+options(scipen = 999)
+
+
+
+#IMPORT DATA HERE AS DATA.FRAME
+
+# dat <- read_csv("~/Downloads/Supplemental_Table_S1_ready.csv")
+
+# path <- here("/Data/Raw/Kurokawa/KHKgrowthcurves_LB.xlsx")
+# 
+# dat <- path %>%
+#   excel_sheets() %>%
+#   set_names() %>%
+#   map_df(~ read_excel(path = path, sheet = .x, range = "A1:M50"), .id = "sheet")
+# 
+
+dat <- data.frame(matrix(ncol = 0, nrow = 49))
+
+for (i in 1:36) {
+dat_new <- read_excel(here("/Data/Raw/Kurokawa/KHKgrowthcurves_LB.xlsx"), sheet = i)
+dat <- cbind(dat,dat_new)
+}
+
+dat <- dat[, !duplicated(colnames(dat))]
+
+# dat <- as.data.frame(dat[complete.cases(dat),])
+
+
+
+trim <- 15
+
+colnames(dat)[1] <- "time"
+
+colnames(dat)[-1] <- str_pad(colnames(dat)[-1], trim, pad = "0", side = "left" )
+
+
+dat <- dat[1:38,] #remove longer growth curves
+
+
+df <- melt(dat,  id.vars = 'time', variable.name = 'series')
+ggplot(df, aes(time,value)) + geom_line(aes(colour = series)) + theme(legend.position = "none") 
+
+
+# maxbyrowraw <- colnames(dat[-1])[max.col(dat[-1],ties.method="random")]
+# maxbyrowconvert <- as.data.frame(table(maxbyrowraw))
+# maxbyrowcount <- arrange(maxbyrowconvert,-Freq)
+# maxmax <- as.character(maxbyrowcount$maxbyrowraw[1])
+
+#note: should always be 1 (first column)
+
+timeColumn <- 1
+#can be adjsuted. average of ctl replicates is recommended based on zero science (seems like a good start).
+controlColumn <- 5
+#shouldn't change unless time column != 1
+a <- 2
+#ADJUST ME: total number of curves in table + 1
+b <- ncol(dat)
+#What is the timepoint at which stationary phase is reached?
+t_stationary <- 8
+
+firstRun <- TRUE
+c <- 2
+d <- length(dat[[timeColumn]])
+#d <- 20 #this is where 'stationary phase' would traditionally be considered fully reached
+for (j in c:d) {
+
+
+figZ <- gcFitSpline(dat[[timeColumn]], dat[[controlColumn]], gcID = "spline",
+            control = grofit.control())
+lambda <- as.numeric(figZ$parameters$lambda)
+mumax <- as.numeric(figZ$parameters$mu)
+K <- as.numeric(figZ$parameters$A)
+upperbound <- as.numeric(dat[j,1])
+#upperbound <- dat[timeColumn[[j]]
+#AUCraw <- AUC(dat[1:length(dat[[timeColumn]]),1], dat[1:length(dat[[controlColumn]]),controlColumn])
+AUCraw <- AUC(dat[1:j,1], dat[1:j,controlColumn])
+PI <- 0
+IscZ <- 0
+
+storage.vector_figZ <- data.frame( "mumax"= mumax, "K"= K, "lambda"= lambda, "UpperBound" = upperbound, "AUC" = AUCraw, "PI" = PI, "Isc" = IscZ, stringsAsFactors=FALSE)
+
+
+for (i in a:b) {
+if(i != controlColumn) {
+figZ <- gcFitSpline(dat$time, dat[[i]], gcID = "spline444",
+            control = grofit.control())
+#plot(figZ)
+
+lambda <- as.numeric(figZ$parameters$lambda)
+mumax <- as.numeric(figZ$parameters$mu)
+K <- as.numeric(figZ$parameters$A)
+upperbound <- as.numeric(dat[j,1])
+
+  AUCraw <- AUC(dat[1:j,1], dat[1:j,i])
+  if(i == controlColumn) {
+    PI <- 0
+  } else {
+    PI <- (1 - (AUCraw/storage.vector_figZ$AUC[1])) * 100
+  }
+
+  IscZ <-  (1 - sqrt((AUCraw*K)/(storage.vector_figZ$AUC[1]*storage.vector_figZ$K[1]))) * 100
+
+
+storage.vector_figZ <- rbind(storage.vector_figZ, c( mumax, K, lambda, upperbound, as.numeric(AUCraw), PI, as.numeric(IscZ)))
+
+
+}
+}
+#output <- rbind
+if(firstRun == TRUE) {
+  #something
+  firstRun <- FALSE
+  rownames(storage.vector_figZ) <- colnames(dat[-timeColumn])
+  FinalOutPutfigZ <- storage.vector_figZ
+} else {
+  rownames(storage.vector_figZ) <- colnames(dat[-timeColumn])
+  FinalOutPutfigZ <- rbind(FinalOutPutfigZ, storage.vector_figZ)
+}
+
+}
+#storage.vector_figZ <- storage.vector_figZ[-c(1), ]
+
+#storage.vector_figZ
+#Below code to get rid of scientific notation:
+options(scipen=999)
+#here is how to get back to scientific notation: options(scipen=0)
+
+
+
+library(data.table)
+setDT(FinalOutPutfigZ, keep.rownames = TRUE)
+#here I'm fixing the group names to not say replicates
+# FinalOutPutfigZ$rn <- c(str_replace_all(string=FinalOutPutfigZ$rn,pattern="\\l.*$",replacement="l"))
+FinalOutPutfigZ$rn <- substr(FinalOutPutfigZ$rn, 1, trim)
+# df$col1 <- strtrim(df$col, 1, 1)
+
+IscOrderedOutputFigZ <- FinalOutPutfigZ %>%
+  arrange((Isc))
+
+
+
+if (exists("maxIsc") == TRUE) {
+  save(FinalOutPutfigZ,file="FinalOutPutfigZ.Rda")
+} else {
+maxIsc <- IscOrderedOutputFigZ[1,1]
+}
+# }
+
+# for writing a data.frame or list of data.frames to an xlsx file
+#write.xlsx(FinalOutPutfigZ, 'Isc_figZISC.xlsx')
+#FinalOutPUtfigZsave <- FinalOutPutfigZ
+
+IscOrderedOutputFigZ
+
+
+
+
+
+
+
+
+
+gdIsc <- FinalOutPutfigZ %>%
+        group_by(rn, UpperBound) %>%
+        #group_by(UpperBound) %>%
+        summarise(Isc = mean(Isc))
+gdVr <- gdIsc %>%
+  group_by(rn) %>%
+  summarize(Vr = auc(UpperBound, Isc, type = "spline")/(max(UpperBound) - min(UpperBound)))
+
+gdPI <- FinalOutPutfigZ %>%
+        group_by(rn) %>%
+        summarise(PI = mean(PI))
+
+AUCfigZ <- FinalOutPutfigZ %>%
+    filter(UpperBound == max(FinalOutPutfigZ$UpperBound)) %>%
+    mutate(rAUC = 100*(AUC/max(AUC))) %>%
+    arrange(rn) %>%
+    select(c(-1,-4, -5, -6, -7, -8))
+AUCfigZ
+
+
+
+trimAUCfigZ <- FinalOutPutfigZ %>%
+    filter(UpperBound == t_stationary) %>%
+    mutate(AUCtrim = 100*(AUC/max(AUC))) %>%
+    arrange(rn) %>%
+    select("AUCtrim")
+
+
+gd <- cbind(gdVr, gdPI, AUCfigZ, trimAUCfigZ)
+gd <- gd[-3]
+gd
+
+gd$virus <- c(
+    rep("CTL", 3),
+    rep("SSV1", 3),
+    rep("SSV8", 3),
+    rep("SSV9", 3),
+    rep("CTL", 1),
+    rep("SSV1", 1),
+    rep("SSV8", 1),
+    rep("SSV9", 1)
+)
+
+# gd$virus <- c(
+#     rep("asnC", 12),
+#     rep("ura3_1", 12),
+#     rep("asnC", 12),
+#     rep("ura3_1", 12),
+#     rep("ura3_2", 12),
+#     rep("idr1_1", 12),
+#     rep("idr2_1", 12),
+#     rep("sirR_1", 12),
+#     rep("ura3_2", 12),
+#     rep("idr1_1", 12),
+#     rep("idr2_1", 12),
+#     rep("sirR_1", 12),
+#     rep("rosR", 12),
+#     rep("ura3_3", 12),
+#     rep("rosR", 12),
+#     rep("ura3_3", 12),
+#     rep("trmB", 12),
+#     rep("VNG1179", 12),
+#     rep("ura3_4", 12),
+#     rep("trmB", 12),
+#     rep("VNG1179", 12),
+#     rep("ura3_4", 12)
+# )
+
+gd$host <- c(
+    rep("S437", 16)
+)
+
+gd437 <- gd
+
+ggplot(data = NULL, aes(x = gd$PI, y = gd$Vr)) +
+  geom_point() +
+  geom_smooth(method = "lm") +
+  geom_abline() +
+  theme_classic()
+
+
+```
+
